@@ -1,21 +1,21 @@
-"use strict";
+'use strict';
 
 // syntactical structure
-// arith_expr := expr ('*' | '-') expr ;
-// expr := number | ident | fn_call | arith_expr ;
-// fn_call := ident '(' expr ')' ';' ;
-// fn_call_st := fn_call ';' ;
-// return_st := 'return' expr ';' ;
-// if_st := 'if' '(' expr ')' '{' body '}' ;
-// statement := if_st | return_st | fn_call_st ;
-// body := statement* ;
-// fn_def := ident ident '(' (ident ident)? ')' '{' body '}' ;
-// program := fn_def+ ;
+// ArithExpr := Expr ('*' | '-') Expr ;
+// Expr := number | ident | FnCall | ArithExpr ;
+// FnCall := ident '(' Expr ')' ';' ;
+// FnCallSt := FnCall ';' ;
+// ReturnSt := 'return' expr ';' ;
+// IfSt := 'if' '(' Expr ')' '{' body '}' ;
+// St := IfSt | ReturnSt | FnCallSt ;
+// body := St* ;
+// FnDef := ident ident '(' (ident ident)? ')' '{' body '}' ;
+// Program := FnDef+ ;
 
 class ParserError extends Error {
   constructor(message) {
     super(message);
-    this.name = "ParserError";
+    this.name = 'ParserError';
   }
 }
 
@@ -25,7 +25,7 @@ function parse(lexer) {
     if (tok.type !== 'ident') {
       throw new ParserError(`Expected ident, found ${tok}`);
     }
-    return { type: 'Identifier', value: tok.value };
+    return tok.value;
   }
 
   function arithExpr(first_tok) {
@@ -41,7 +41,7 @@ function parse(lexer) {
       throw new ParserError(`Expected operation, found ${next}`);
     }
     return {
-      type: 'CompExpr',
+      type: 'ArithExpr',
       left: first_tok,
       op: op,
       right: expr(),
@@ -58,12 +58,9 @@ function parse(lexer) {
     if (!['ident', 'number'].includes(tok.type)) {
       throw new ParserError(`Expected expr, found ${tok}`);
     }
-    let tok_value = {
-      type: tok.type === 'ident' ? 'Ident' : 'Number',
-      value: tok.value,
-    };
+    let tok_value = { type: tok.type, value: tok.value };
     if (tok.type === 'ident' && peek() == '(') {
-      return fnCallWithName(tok);
+      return fnCallWithName(tok.value);
     } else if (['*', '-', '<'].includes(peek())) {
       return arithExpr(tok_value);
     } else {
@@ -71,20 +68,24 @@ function parse(lexer) {
     }
   }
 
-  function eat(token) {
+  function eat(terminal, token) {
     let next = lexer.next();
     for (let [prop, val] of Object.entries(token)) {
       if (next[prop] !== val) {
-        throw new ParserError(`expected ${JSON.stringify(token)}, got ${next}`);
+        let expected = `${val}`;
+        let actual = `${next[prop]}`;
+        throw new ParserError(
+          `failed to parse ${terminal}: ` +
+          `expected ${expected}, found ${actual}`);
       }
     }
     return next;
   }
 
   function fnCallWithName(name) {
-    eat({ type: 'symbol', value: '(' });
+    eat('FnCall', { value: '(' });
     let arg = expr();
-    eat({ type: 'symbol', value: ')' });
+    eat('FnCall', { value: ')' });
     return {
       type: 'FnCall',
       fn_name: name,
@@ -98,7 +99,7 @@ function parse(lexer) {
 
   function returnSt() {
     let value = expr();
-    eat({ type: 'symbol', value: ';' });
+    eat('ReturnSt', { value: ';' });
     return {
       type: 'ReturnSt',
       value: value,
@@ -112,12 +113,12 @@ function parse(lexer) {
   }
 
   function ifSt() {
-    eat({ type: 'symbol', value: '(' });
+    eat('IfSt', { value: '(' });
     let condition = expr();
-    eat({ type: 'symbol', value: ')' });
-    eat({ type: 'symbol', value: '{' });
+    eat('IfSt', { value: ')' });
+    eat('IfSt', { value: '{' });
     let body = until('}', statement);
-    eat({ type: 'symbol', value: '}' });
+    eat('IfSt', { value: '}' });
     return {
       type: 'IfSt',
       condition: condition,
@@ -135,7 +136,7 @@ function parse(lexer) {
       case 'return': return returnSt();
       default: {
         let st = fnCallWithName(tok.value);
-        eat({ type: 'symbol', value: ';' });
+        eat('St', { value: ';' });
         return st;
       }
     }
@@ -144,16 +145,17 @@ function parse(lexer) {
   function fnDef() {
     let ret_type = ident();
     let name = ident();
-    eat({ type: "symbol", value: "(" });
-    let param_type, param_name;
+    eat('FnDef', { value: '(' });
+    let param_type = null;
+    let param_name = null;
     if (peek() !== ')') {
       param_type = ident();
       param_name = ident();
     }
-    eat({ type: "symbol", value: ")" });
-    eat({ type: 'symbol', value: '{' });
+    eat('FnDef', { value: ')' });
+    eat('FnDef', { value: '{' });
     let body = until('}', statement);
-    eat({ type: 'symbol', value: '}' });
+    eat('FnDef', { value: '}' });
     return {
       type: 'FnDef',
       return_type: ret_type,
@@ -165,11 +167,14 @@ function parse(lexer) {
   }
 
   function program() {
-    let fn_defs = [];
+    let body = [];
     while (!lexer.atEnd()) {
-      fn_defs.push(fnDef());
+      body.push(fnDef());
     }
-    return fn_defs;
+    return {
+      type: 'Program',
+      body: body,
+    };
   }
 
   return program();
@@ -185,7 +190,7 @@ function parse(lexer) {
 class LexingError extends Error {
   constructor(message, line, col) {
     super(`Lexing error at ${line}:${col}: ${message}`);
-    this.name = "LexingError";
+    this.name = 'LexingError';
   }
 }
 
@@ -221,7 +226,7 @@ class Lexer {
   isNumber() {
     if (this.atEnd()) return false;
     let ch = this.peek();
-    return "0123456789".includes(ch);
+    return '0123456789'.includes(ch);
   }
 
   scanNumber() {
@@ -239,7 +244,7 @@ class Lexer {
   isIdent() {
     if (this.atEnd()) return false;
     let ch = this.peek();
-    return (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z");
+    return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
   }
 
   scanIdent() {
@@ -251,8 +256,8 @@ class Lexer {
   }
 
   eatWhitespace() {
-    while (!this.atEnd() && " \n\t".includes(this.peek())) {
-      if (this.peek() == "\n") {
+    while (!this.atEnd() && ' \n\t'.includes(this.peek())) {
+      if (this.peek() == '\n') {
         this.line++;
         this.col = 0;
       }
@@ -263,16 +268,16 @@ class Lexer {
   next() {
     this.eatWhitespace();
     if (this.atEnd()) {
-      return this.emit({ type: "eof", value: null });
+      return this.emit({ type: 'eof', value: 'eof' });
     }
     let ch = this.peek();
-    if ("(){};<*-".includes(ch)) {
-      return this.emit({ type: "symbol", value: this.eat() });
+    if ('(){};<*-'.includes(ch)) {
+      return this.emit({ type: 'symbol', value: this.eat() });
     } else if (this.isNumber()) {
-      return this.emit({ type: "number", value: this.scanNumber() });
+      return this.emit({ type: 'number', value: this.scanNumber() });
     } else if (this.isIdent()) {
       let ident = this.scanIdent();
-      let type = ["if", "return"].includes(ident) ? "keyword" : "ident";
+      let type = ['if', 'return'].includes(ident) ? 'keyword' : 'ident';
       return this.emit({ type: type, value: ident });
     }
     throw this.error(`Invalid lexical element starting with ${ch}`);
@@ -291,15 +296,15 @@ function fail(message) {
 const util = require('util');
 
 function main() {
-  const fs = require("fs");
+  const fs = require('fs');
   const args = process.argv.slice(2);
   if (args.length != 1) {
-    fail("Usage: node adso.js <file>");
+    fail('Usage: node adso.js <file>');
   }
   const file = args[0];
   let text;
   try {
-    text = fs.readFileSync(file, "utf8").trim();
+    text = fs.readFileSync(file, 'utf8').trim();
   } catch (err) {
     fail(`failed to read ${file}: ${err}`);
   }
